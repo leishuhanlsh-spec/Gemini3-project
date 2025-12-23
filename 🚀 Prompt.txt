@@ -1,0 +1,55 @@
+🚀 Prompt:
+角色设定：
+你是一位世界级的 Creative Technologist，精通 Three.js (WebGL)、GLSL 着色器逻辑以及 Google MediaPipe 计算机视觉集成。
+任务目标：
+请编写一个单文件 (Single-File) 的 HTML 项目，用来通过手势进行圣诞树不同形态的交互。该项目必须包含完整的 HTML 结构、CSS 样式和基于 ES Module 的 JavaScript 代码。
+核心技术栈约束 (必须严格遵守)：
+依赖管理： 使用 <script type="importmap"> 引入：
+three: https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js
+three/addons/: https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/
+@mediapipe/tasks-vision: https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm
+代码风格： 使用现代 ES6+ 语法，类 (Class) 结构管理粒子，异步/等待 (Async/Await) 处理加载。
+📝 详细开发规格说明书
+1. UI 设计与 CSS 样式 (Visual Identity)
+字体： 引入 Google Fonts 'Cinzel' (标题) 和 'Times New Roman' (正文)。
+配色： 背景 #000000，并带有与圣诞树对应颜色的粒子，粒子大小不规则，使用荧光颜色。
+香槟金 #d4af37，奶油白 #fceea7。
+UI 组件：
+加载界面： 黑色全屏遮罩，带有雪花状以及圆形荧光粒子，大小不规则，奶油白 #fceea7，可以加少量酒红色，香槟金小粒子。正中间为 20px 的圣诞树模型以及堆放的礼物，样式参考素材中图片717.png，圣诞树灯球可以发光，下方文字 "Merry Christmas"。初始化完成后淡出。
+demo1：正中间香槟金 #d4af37丝带状，样式参考5808.jpg_wh860.jpg，最上方一个橙色五角星。要求粒子数量浓密，最少不超过3000
+demo2：一样的香槟金色，开始绽放烟花，样式参考OIP-C.webp，要粒子特效
+demo3：生成水晶球，中间是圣诞树和礼物，球内飘落雪花参考780.jpg，雪花粒子特效，圣诞树不用
+2. Three.js 场景构建 (Scene Setup)
+渲染器： WebGLRenderer (antialias: true)，toneMapping 设置为 ReinhardToneMapping (曝光 2.2)。
+相机： 透视相机。
+环境 (Environment)： 使用 RoomEnvironment 配合 PMREMGenerator 生成高反射金属环境贴图。
+后期处理 (Post-Processing)：
+使用 EffectComposer。
+添加 UnrealBloomPass (辉光特效)。
+灯光系统：
+AmbientLight 。
+内部 PointLight (橙色, 强度 2)。
+SpotLight (金色, 强度 1200, 位置 30,40,40)。
+SpotLight (蓝色, 强度 600, 位置 -30,20,-30) 用于冷暖对比。
+3. 粒子系统与内容 (Content Generation)
+粒子总数： 约 1500 个主体粒子 + 2500 个尘埃粒子。
+几何体混合：
+BoxGeometry: 材质为金色和深绿色 MeshStandardMaterial。
+SphereGeometry: 材质为金色和红色 MeshPhysicalMaterial (红色带 clearcoat)。
+必须程序化生成纹理：使用 Canvas 2D API 绘制白底红斜纹，创建 CanvasTexture。
+4. 状态机与动画逻辑 (State Machine & Logic)
+定义全局 STATE 对象，包含模式 (mode) 和手势数据。在 animate 循环中根据模式计算目标位置并使用 lerp 平滑过渡。
+Mode 1: 张开手掌，圣诞树沿着光条消失
+Mode 2: 捏合生成mode2模型，张开双手后绽放烟花特效
+Mode 3: 握拳生成水晶球模型。
+5. MediaPipe 计算机视觉集成 (Computer Vision)，我已下载js文件，可以直接本地调用
+模型加载： 
+使用 FilesetResolver 和 HandLandmarker。
+手势识别算法 (Process Gestures)：
+获取关键点：拇指(4), 食指(8), 手腕(0), 其他指尖(12,16,20)。
+Pinch (捏合)： Math.hypot(thumb - index) < 0.05。
+Fist (握拳)： 四指尖到手腕平均距离 < 0.25 。
+Open Hand (张开)： 四指尖到手腕平均距离 > 0.4。
+交互映射：
+将手掌中心 (Landmark 9) 的标准化 X/Y 坐标，映射为 3D 场景根容器 (mainGroup) 的 rotation.y 和 rotation.x。
+请输出完整的、包含所有这些细节的单文件 HTML 代码。
