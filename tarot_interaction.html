@@ -352,18 +352,16 @@
             return tex;
         })();
 
-        // Front Texture Generator (Updated to use Real Rider-Waite Images)
+        // Front Texture Generator (Local Images)
         const textureLoader = new THREE.TextureLoader();
-        textureLoader.crossOrigin = 'anonymous';
+        // textureLoader.crossOrigin = 'anonymous'; // Not needed for local files if on same server
 
         function createFrontTexture(index) {
-            // Logic to fetch Rider-Waite card images
-            // Source: sacred-texts.com (Public Domain RWS)
-            // Proxy: images.weserv.nl (For CORS and resizing)
+            // Local path to images
+            // Ensure you are running this on a local server (e.g., Live Server, python http.server)
+            // or browser security settings allow local file access.
             
-            const corsProxy = 'https://images.weserv.nl/?url=';
-            const baseUrl = 'sacred-texts.com/tarot/pkt/img/';
-            
+            const baseUrl = './tarot_images/';
             let filename = '';
             
             if (index < 22) {
@@ -372,8 +370,6 @@
                 filename = `ar${num}.jpg`;
             } else {
                 // Minor Arcana
-                // Suits order in DECK_DATA: Wands, Cups, Swords, Pentacles
-                // Sacred-Texts prefixes: wa, cu, sw, pe
                 const relativeIdx = index - 22;
                 const suitIdx = Math.floor(relativeIdx / 14);
                 const cardVal = (relativeIdx % 14) + 1; // 1 to 14
@@ -385,11 +381,16 @@
                 filename = `${prefix}${num}.jpg`;
             }
             
-            const finalUrl = `${corsProxy}${baseUrl}${filename}&w=512&output=jpg`;
+            const finalUrl = `${baseUrl}${filename}`;
             
             // Load texture
-            // It will display as the material's color (white) until loaded
-            const tex = textureLoader.load(finalUrl);
+            const tex = textureLoader.load(finalUrl, 
+                undefined, // onLoad
+                undefined, // onProgress
+                (err) => {
+                    console.error("Error loading texture:", finalUrl, err);
+                }
+            );
             tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
             return tex;
         }
