@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mystic Tarot Interaction</title>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            overflow: hidden;
+            background: #000000;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(20,20,20,1) 0%, rgba(0,0,0,1) 100%),
+                repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 20px),
+                repeating-linear-gradient(-45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 20px);
+            font-family: 'Segoe UI', 'Microsoft YaHei', serif;
+            color: white;
+        }
+
+        /* Fullscreen Button */
+        #fullscreen-btn {
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            width: 24px;
+            height: 24px;
+            z-index: 200;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: all 0.3s ease;
+        }
+        #fullscreen-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+        /* Four Corners Icon using CSS borders */
+        .fs-corner {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            transition: all 0.3s;
+            box-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
+        }
+        .fs-tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+        .fs-tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+        .fs-bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+        .fs-br { bottom: 0; right: 0; border-left: none; border-top: none; }
+        
+        /* Expand animation on hover */
+        #fullscreen-btn:hover .fs-tl { transform: translate(-1px, -1px); }
+        #fullscreen-btn:hover .fs-tr { transform: translate(1px, -1px); }
+        #fullscreen-btn:hover .fs-bl { transform: translate(-1px, 1px); }
+        #fullscreen-btn:hover .fs-br { transform: translate(1px, 1px); }
+
+        /* User Camera (Small Box Bottom Right) */
+        #user-camera-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+        #input_video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror */
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* UI Overlays */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to 3D if needed, but we handle buttons manually */
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffd700;
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        }
+
+        /* Revealed Card Info */
+        #card-info-panel {
+            position: absolute;
+            bottom: 10%;
+            left: 50%;
+            transform: translateX(-50%) translateY(50px);
+            width: 80%;
+            max-width: 600px;
+            text-align: center;
+            opacity: 0;
+            transition: all 1s ease;
+        }
+        #card-info-panel.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .card-title {
+            font-size: 3rem;
+            color: #ffd700;
+            font-family: 'Times New Roman', serif;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 10px rgba(255, 215, 0, 0.3);
+        }
+        .card-keywords {
+            font-size: 1.5rem;
+            color: #aaddff;
+            margin-bottom: 1.5rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        /* Virtual Cursor for Index Finger */
+        #virtual-cursor {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ffd700;
+            border-radius: 50%;
+            background: rgba(255, 215, 0, 0.3);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            display: none;
+            z-index: 999;
+            box-shadow: 0 0 10px #ffd700;
+        }
+        #virtual-cursor.active {
+            display: block;
+        }
+        #virtual-cursor.clicking {
+            background: rgba(255, 215, 0, 0.8);
+            transform: translate(-50%, -50%) scale(0.8);
+        }
+
+    </style>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="./hands.js"></script>
+</head>
+<body>
+
+    <div id="fullscreen-btn" title="Toggle Fullscreen">
+        <div class="fs-corner fs-tl"></div>
+        <div class="fs-corner fs-tr"></div>
+        <div class="fs-corner fs-bl"></div>
+        <div class="fs-corner fs-br"></div>
+    </div>
+
+    <div id="user-camera-container">
+        <video id="input_video" autoplay playsinline></video>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div class="ui-layer">
+        <div id="virtual-cursor"></div>
+        <div id="loading">Initializing Mystic Deck...</div>
+        
+        <div id="card-info-panel">
+            <div class="card-title" id="card-name">The Fool</div>
+            <div class="card-keywords" id="card-keywords">New Beginnings · Faith</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Tarot Data (Simulated 78 cards) ---
+        // We will generate the rest procedurally
+        const MAJOR_ARCANA = [
+            { name: "The Fool", nameCN: "愚者", keywords: "Beginning · Faith" },
+            { name: "The Magician", nameCN: "魔术师", keywords: "Power · Action" },
+            { name: "The High Priestess", nameCN: "女祭司", keywords: "Intuition · Mystery" },
+            { name: "The Empress", nameCN: "皇后", keywords: "Fertility · Nature" },
+            { name: "The Emperor", nameCN: "皇帝", keywords: "Authority · Structure" },
+            { name: "The Hierophant", nameCN: "教皇", keywords: "Tradition · Belief" },
+            { name: "The Lovers", nameCN: "恋人", keywords: "Love · Choices" },
+            { name: "The Chariot", nameCN: "战车", keywords: "Victory · Will" },
+            { name: "Strength", nameCN: "力量", keywords: "Courage · Compassion" },
+            { name: "The Hermit", nameCN: "隐士", keywords: "Guidance · Solitude" },
+            { name: "Wheel of Fortune", nameCN: "命运之轮", keywords: "Change · Cycles" },
+            { name: "Justice", nameCN: "正义", keywords: "Truth · Law" },
+            { name: "The Hanged Man", nameCN: "倒吊人", keywords: "Sacrifice · Pause" },
+            { name: "Death", nameCN: "死神", keywords: "End · New Start" },
+            { name: "Temperance", nameCN: "节制", keywords: "Balance · Patience" },
+            { name: "The Devil", nameCN: "恶魔", keywords: "Addiction · Materialism" },
+            { name: "The Tower", nameCN: "高塔", keywords: "Destruction · Awakening" },
+            { name: "The Star", nameCN: "星星", keywords: "Hope · Faith" },
+            { name: "The Moon", nameCN: "月亮", keywords: "Illusion · Fear" },
+            { name: "The Sun", nameCN: "太阳", keywords: "Joy · Success" },
+            { name: "Judgement", nameCN: "审判", keywords: "Rebirth · Absolution" },
+            { name: "The World", nameCN: "世界", keywords: "Completion · Travel" }
+        ];
+
+        // Generate full deck data (78 cards)
+        const DECK_DATA = [...MAJOR_ARCANA];
+        const SUITS = ['Wands', 'Cups', 'Swords', 'Pentacles'];
+        const SUITS_CN = ['权杖', '圣杯', '宝剑', '星币'];
+        
+        SUITS.forEach((suit, sIdx) => {
+            for (let i = 1; i <= 14; i++) {
+                let name = `${i} of ${suit}`;
+                let nameCN = `${i} ${SUITS_CN[sIdx]}`;
+                if (i === 1) { name = `Ace of ${suit}`; nameCN = `${SUITS_CN[sIdx]}王牌`; }
+                if (i === 11) { name = `Page of ${suit}`; nameCN = `${SUITS_CN[sIdx]}侍从`; }
+                if (i === 12) { name = `Knight of ${suit}`; nameCN = `${SUITS_CN[sIdx]}骑士`; }
+                if (i === 13) { name = `Queen of ${suit}`; nameCN = `${SUITS_CN[sIdx]}皇后`; }
+                if (i === 14) { name = `King of ${suit}`; nameCN = `${SUITS_CN[sIdx]}国王`; }
+                
+                DECK_DATA.push({
+                    name: name,
+                    nameCN: nameCN,
+                    keywords: "Minor Arcana · " + suit
+                });
+            }
+        });
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        // Background particles will handle the atmosphere
+        
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 45); // Further back to see more
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        container.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+        scene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffddaa, 1.5);
+        mainLight.position.set(10, 20, 20);
+        scene.add(mainLight);
+
+        const pointLight = new THREE.PointLight(0x4444ff, 1, 100);
+        pointLight.position.set(-10, 5, 10);
+        scene.add(pointLight);
+
+        // --- Assets: Card Textures ---
+        
+        // Shared Back Texture
+        const backTexture = (() => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 896; // 1:1.75
+            const ctx = canvas.getContext('2d');
+            
+            // Dark intricate background
+            const grd = ctx.createRadialGradient(256, 448, 50, 256, 448, 500);
+            grd.addColorStop(0, "#2a1b3d");
+            grd.addColorStop(1, "#0d0a1a");
+            ctx.fillStyle = grd;
+            ctx.fillRect(0, 0, 512, 896);
+            
+            // Gold Border
+            ctx.strokeStyle = "#c5a059";
+            ctx.lineWidth = 15;
+            ctx.strokeRect(20, 20, 472, 856);
+            ctx.lineWidth = 4;
+            ctx.strokeRect(35, 35, 442, 826);
+            
+            // Pattern (Hexagramish) & New Details
+            ctx.save();
+            ctx.translate(256, 448);
+            ctx.strokeStyle = "rgba(197, 160, 89, 0.3)";
+            ctx.lineWidth = 2;
+            for(let i=0; i<12; i++) {
+                ctx.rotate(Math.PI / 6);
+                ctx.strokeRect(-100, -100, 200, 200);
+            }
+            
+            // Extra intricate circles
+            ctx.beginPath();
+            ctx.arc(0, 0, 150, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(255, 215, 0, 0.2)";
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, 180, 0, Math.PI * 2);
+            ctx.setLineDash([5, 10]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Corner Flourishes
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = "rgba(197, 160, 89, 0.1)";
+            ctx.fillRect(-200, -350, 400, 700);
+            
+            // Central Symbol
+            ctx.strokeStyle = "#ffd700";
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(0, 0, 80, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Star
+            ctx.beginPath();
+            for(let i=0; i<6; i++) {
+                const angle = i * Math.PI / 3;
+                ctx.lineTo(Math.cos(angle)*80, Math.sin(angle)*80);
+                ctx.lineTo(Math.cos(angle + Math.PI/3)*(-80), Math.sin(angle + Math.PI/3)*(-80));
+            }
+            ctx.stroke();
+            ctx.restore();
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return tex;
+        })();
+
+        // Front Texture Generator (Updated to use Real Rider-Waite Images)
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.crossOrigin = 'anonymous';
+
+        function createFrontTexture(index) {
+            // Logic to fetch Rider-Waite card images
+            // Source: sacred-texts.com (Public Domain RWS)
+            // Proxy: images.weserv.nl (For CORS and resizing)
+            
+            const corsProxy = 'https://images.weserv.nl/?url=';
+            const baseUrl = 'sacred-texts.com/tarot/pkt/img/';
+            
+            let filename = '';
+            
+            if (index < 22) {
+                // Major Arcana: ar00.jpg - ar21.jpg
+                const num = index.toString().padStart(2, '0');
+                filename = `ar${num}.jpg`;
+            } else {
+                // Minor Arcana
+                // Suits order in DECK_DATA: Wands, Cups, Swords, Pentacles
+                // Sacred-Texts prefixes: wa, cu, sw, pe
+                const relativeIdx = index - 22;
+                const suitIdx = Math.floor(relativeIdx / 14);
+                const cardVal = (relativeIdx % 14) + 1; // 1 to 14
+                
+                const prefixes = ['wa', 'cu', 'sw', 'pe'];
+                const prefix = prefixes[suitIdx];
+                const num = cardVal.toString().padStart(2, '0');
+                
+                filename = `${prefix}${num}.jpg`;
+            }
+            
+            const finalUrl = `${corsProxy}${baseUrl}${filename}&w=512&output=jpg`;
+            
+            // Load texture
+            // It will display as the material's color (white) until loaded
+            const tex = textureLoader.load(finalUrl);
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return tex;
+        }
+
+        // --- Objects: The Deck ---
+        // Restore card size (approx 1/3 screen height)
+        const cardGeometry = new THREE.BoxGeometry(7.0, 12.0, 0.1); 
+        const cardMaterialSide = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const cardMaterialBack = new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.4, metalness: 0.6 });
+        
+        const cards = [];
+        const cardGroup = new THREE.Group();
+        scene.add(cardGroup);
+
+        // Pre-create generic front material to swap later (optimization)
+        const defaultFrontMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+
+        for (let i = 0; i < 78; i++) {
+            const materials = [
+                cardMaterialSide, cardMaterialSide, cardMaterialSide, cardMaterialSide,
+                defaultFrontMat, // Front (Index 4) - We will swap this when revealed
+                cardMaterialBack // Back (Index 5)
+            ];
+            const mesh = new THREE.Mesh(cardGeometry, materials);
+            mesh.userData = { 
+                id: i, 
+                index: i,
+                originalPos: new THREE.Vector3(),
+                originalRot: new THREE.Euler()
+            };
+            
+            // Stacked in center (slightly offset for volume)
+            mesh.position.set(0, -2, -i * 0.01); 
+            mesh.rotation.y = Math.PI; // Face down
+            mesh.rotation.z = (Math.random() - 0.5) * 0.05; // Messy stack
+            
+            cardGroup.add(mesh);
+            cards.push(mesh);
+        }
+
+        // --- Background Magic Circle (Static) ---
+        const magicCircleGroup = new THREE.Group();
+        const circleTex = (() => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            // Neon Glow Settings
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#00ffff";
+            ctx.strokeStyle = "rgba(0, 255, 255, 0.6)"; // Neon Cyan
+            ctx.lineWidth = 4;
+            ctx.translate(512, 512);
+            
+            // Outer Circles
+            ctx.beginPath(); ctx.arc(0, 0, 480, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, 460, 0, Math.PI*2); ctx.stroke();
+            
+            // Hexagram
+            ctx.strokeStyle = "rgba(255, 215, 0, 0.6)"; // Bright Gold/Yellow
+            ctx.shadowColor = "#ffd700";
+            ctx.beginPath();
+            for(let i=0; i<3; i++) {
+                const a = i * Math.PI * 2 / 3;
+                const r = 460;
+                ctx.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+                ctx.lineTo(Math.cos(a + Math.PI*2/3)*r, Math.sin(a + Math.PI*2/3)*r);
+                ctx.lineTo(Math.cos(a + Math.PI*4/3)*r, Math.sin(a + Math.PI*4/3)*r);
+                ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+            }
+            // Inverse Triangle
+            ctx.rotate(Math.PI);
+             for(let i=0; i<3; i++) {
+                const a = i * Math.PI * 2 / 3;
+                const r = 460;
+                ctx.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+                ctx.lineTo(Math.cos(a + Math.PI*2/3)*r, Math.sin(a + Math.PI*2/3)*r);
+                ctx.lineTo(Math.cos(a + Math.PI*4/3)*r, Math.sin(a + Math.PI*4/3)*r);
+                ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+            }
+            ctx.stroke();
+
+            // Runes
+            ctx.font = "40px monospace";
+            ctx.fillStyle = "rgba(0, 255, 100, 0.8)"; // Neon Green
+            ctx.shadowColor = "#00ff64";
+            ctx.textAlign = "center";
+            for(let i=0; i<12; i++) {
+                ctx.save();
+                ctx.rotate(i * Math.PI / 6);
+                ctx.fillText("✦", 0, -420);
+                ctx.restore();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return tex;
+        })();
+        
+        const magicPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(55, 55),
+            new THREE.MeshBasicMaterial({ map: circleTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
+        );
+        magicCircleGroup.add(magicPlane);
+        magicCircleGroup.position.z = -15; // Behind cards
+        scene.add(magicCircleGroup);
+
+        // --- Background Particles (Multi-Layer) ---
+        const particleGroups = [];
+        const sizes = [0.4, 0.8, 1.5]; // Irregular sizes
+        const counts = [5000, 3000, 1000]; 
+        
+        // Sharper Circle Sprite
+        const circleSprite = (() => {
+             const canvas = document.createElement('canvas');
+             canvas.width = 64; canvas.height = 64;
+             const ctx = canvas.getContext('2d');
+             
+             const grad = ctx.createRadialGradient(32,32,0,32,32,32);
+             grad.addColorStop(0, 'rgba(255,255,255,1)');
+             grad.addColorStop(0.4, 'rgba(255,255,255,0.9)'); 
+             grad.addColorStop(1, 'rgba(255,255,255,0)');
+             
+             ctx.fillStyle = grad;
+             ctx.fillRect(0,0,64,64);
+             return new THREE.CanvasTexture(canvas);
+        })();
+
+        sizes.forEach((size, idx) => {
+            const pGeo = new THREE.BufferGeometry();
+            const pPos = [];
+            const pColors = [];
+            const color = new THREE.Color();
+            
+            for(let i=0; i<counts[idx]; i++) {
+                // Spherical distribution
+                const r = 30 + Math.random() * 80;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                
+                const x = r * Math.sin(phi) * Math.cos(theta);
+                const y = r * Math.sin(phi) * Math.sin(theta);
+                const z = r * Math.cos(phi) - 20; 
+                
+                pPos.push(x, y, z);
+                
+                // Colors: Vivid Neon
+                const rand = Math.random();
+                if (rand > 0.8) color.setHex(0xffaa00); // Neon Orange
+                else if (rand > 0.6) color.setHex(0x00ffff); // Neon Cyan
+                else if (rand > 0.4) color.setHex(0xccff00); // Neon Green
+                else color.setHex(0xffffff); // White
+                
+                pColors.push(color.r, color.g, color.b);
+            }
+            pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPos, 3));
+            pGeo.setAttribute('color', new THREE.Float32BufferAttribute(pColors, 3));
+            
+            const pMat = new THREE.PointsMaterial({
+                vertexColors: true,
+                size: size,
+                map: circleSprite,
+                transparent: true,
+                opacity: 0.95,
+                blending: THREE.NormalBlending,
+                depthWrite: false
+            });
+            
+            const pSystem = new THREE.Points(pGeo, pMat);
+            scene.add(pSystem);
+            particleGroups.push(pSystem);
+        });
+
+
+        // Twinkling effect in loop
+
+
+        // --- Selector Indicator (Ornate Crystal) ---
+        const selectorGroup = new THREE.Group();
+        
+        // 1. Core Crystal (Octahedron)
+        const crystalGeo = new THREE.OctahedronGeometry(0.8, 0);
+        const crystalMat = new THREE.MeshBasicMaterial({ 
+            color: 0xffd700, 
+            wireframe: true,
+            transparent: true,
+            opacity: 0.8
+        });
+        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+        
+        // Inner Glow
+        const crystalCoreGeo = new THREE.OctahedronGeometry(0.4, 0);
+        const crystalCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const crystalCore = new THREE.Mesh(crystalCoreGeo, crystalCoreMat);
+        
+        // 2. Ornate Rings
+        const ringGeo1 = new THREE.TorusGeometry(1.2, 0.02, 16, 100);
+        const ringMat1 = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 });
+        const ring1 = new THREE.Mesh(ringGeo1, ringMat1);
+        ring1.rotation.x = Math.PI / 2;
+
+        const ringGeo2 = new THREE.TorusGeometry(1.5, 0.03, 16, 6); // Hexagonal ring
+        const ringMat2 = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4 });
+        const ring2 = new THREE.Mesh(ringGeo2, ringMat2);
+        ring2.rotation.x = Math.PI / 2;
+        
+        // 3. Floating Particles (Simple dots around)
+        // ... (Optional, keep simple for perf)
+
+        selectorGroup.add(crystal);
+        selectorGroup.add(crystalCore);
+        selectorGroup.add(ring1);
+        selectorGroup.add(ring2);
+        
+        selectorGroup.visible = false;
+        
+        // STATIC POSITION (Will be updated in loop, but set initial)
+        selectorGroup.position.set(0, 0, 0); 
+        scene.add(selectorGroup);
+
+        // --- State Management ---
+        const AppState = {
+            mode: 'HOME', // HOME, SPREAD, REVEALING, REVEALED
+            handDetected: false,
+            gesture: 'NONE',
+            scrollVelocity: 0,
+            scrollOffset: 0, // 0 to 78 roughly
+            selectedIndex: 0,
+            lastHandX: 0.5,
+            revealedCardIndex: -1,
+            revealTime: 0,
+            lastPalmSize: 0 // Track palm size
+        };
+
+        // --- Logic ---
+        
+        function updateLayout(time) {
+            if (AppState.mode === 'HOME') {
+                // Breathing stack
+                cards.forEach((c, i) => {
+                    c.position.y = -2 + Math.sin(time * 2 + i * 0.1) * 0.1;
+                });
+                selectorGroup.visible = false;
+            } 
+            else if (AppState.mode === 'SPREAD') {
+                // SPREAD LINEAR LAYOUT (Strictly Straight)
+                
+                const SPACING = 5.0; // Distance between cards
+                
+                // Update scroll
+                AppState.scrollOffset = Math.max(0, Math.min(78, AppState.scrollOffset + AppState.scrollVelocity));
+                AppState.scrollVelocity *= 0.90; 
+
+                // Current Center Index
+                const centerIndex = Math.round(AppState.scrollOffset);
+                AppState.selectedIndex = Math.max(0, Math.min(77, centerIndex));
+                
+                // We keep the cards moving relative to a fixed center point (x=0)
+                // AppState.scrollOffset determines which card is at index 0.
+                
+                cards.forEach((c, i) => {
+                    const relativeIndex = i - AppState.scrollOffset;
+                    
+                    // Only render visible range
+                    if (Math.abs(relativeIndex) > 15) {
+                         c.position.set(0, -100, 0);
+                         return;
+                    }
+                    
+                    // STRICT LINEAR relative to scroll
+                    // relativeIndex 0 -> x = 0
+                    const targetX = relativeIndex * SPACING;
+                    const targetY = 0; // Centered in Magic Circle (y=0)
+                    const targetZ = 0; // Flat plane
+                    
+                    // Lerp for smooth catch-up
+                    c.position.x += (targetX - c.position.x) * 0.1;
+                    c.position.y += (targetY - c.position.y) * 0.1;
+                    c.position.z += (targetZ - c.position.z) * 0.1;
+                    
+                    // Rotation (Flat)
+                    c.rotation.y = Math.PI; 
+                    c.rotation.x = 0;
+                    c.rotation.z = 0; 
+                });
+
+                // Selector is FIXED in the center visually (x=0)
+                if (AppState.selectedIndex >= 0) {
+                     selectorGroup.visible = true;
+                     
+                     // Position above the center card
+                     selectorGroup.position.set(0, 8.5, 0); 
+                     
+                     // Rotate components
+                     selectorGroup.children[0].rotation.y += 0.02; // Crystal
+                     selectorGroup.children[2].rotation.z -= 0.02; // Ring 1
+                     selectorGroup.children[3].rotation.z += 0.01; // Ring 2
+                }
+            }
+        }
+
+        // --- Interaction ---
+        
+        function onHandResults(results) {
+            document.getElementById('loading').style.display = 'none';
+
+            // Clear cursor if no hand
+            const cursor = document.getElementById('virtual-cursor');
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                AppState.handDetected = true;
+                
+                // 1. Gesture Detection
+                const wrist = landmarks[0];
+                const tips = [8, 12, 16, 20];
+                const mcp = [5, 9, 13, 17];
+                
+                let fingersUp = 0;
+                tips.forEach((tIdx, i) => {
+                    const tip = landmarks[tIdx];
+                    const base = landmarks[mcp[i]];
+                    if (tip.y < base.y) fingersUp++; // MediaPipe Y is inverted (0 top, 1 bottom)? Actually 0 is top. So tip.y < base.y means finger is UP.
+                });
+
+                // Index Finger Detection for Clicking (Tip 8)
+                const indexTip = landmarks[8];
+                const indexExtended = (indexTip.y < landmarks[6].y); // Tip above PIP
+
+                // Map Index Tip to Screen for Cursor
+                // Video is mirrored, so x is 1-x
+                const cursorX = (1 - indexTip.x) * window.innerWidth;
+                const cursorY = indexTip.y * window.innerHeight;
+                
+                cursor.style.left = cursorX + 'px';
+                cursor.style.top = cursorY + 'px';
+                
+                if (AppState.mode === 'REVEALED') {
+                    /* Logic moved to main loop to access palmSize */
+                } else {
+                    cursor.classList.remove('active');
+                    cursor.classList.remove('clicking');
+                }
+
+                // Global Gestures
+                // Fist: High tracking confidence, fingers curled.
+                // Open: Fingers extended.
+                
+                // Heuristic: Average distance of tips to wrist
+                let avgDist = 0;
+                tips.forEach(t => {
+                    const l = landmarks[t];
+                    avgDist += Math.hypot(l.x - wrist.x, l.y - wrist.y);
+                });
+                avgDist /= 4;
+                
+                // This threshold depends on hand z/distance, but let's assume standard webcam distance
+                // Palm size normalization
+                const palmSize = Math.hypot(landmarks[0].x - landmarks[9].x, landmarks[0].y - landmarks[9].y);
+                const openness = avgDist / palmSize;
+
+                if (openness > 1.2) {
+                    AppState.gesture = 'OPEN';
+                } else if (openness < 0.8) {
+                    AppState.gesture = 'FIST';
+                } else {
+                    AppState.gesture = 'NEUTRAL';
+                }
+                
+                // 2. Logic based on Mode
+                if (AppState.mode === 'HOME') {
+                    if (AppState.gesture === 'OPEN') {
+                        enterSpreadMode();
+                    }
+                }
+                else if (AppState.mode === 'SPREAD') {
+                    if (AppState.gesture === 'OPEN') {
+                        // Scrolling
+                        const handX = 1 - landmarks[9].x; // Center of palm, mirrored
+                        
+                        // Map 0.4-0.6 to deadzone to prevent jitter
+                        const deadZone = 0.08; // Slightly larger deadzone
+                        const sensitivity = 0.1; // Much Slower (was 0.3)
+                        
+                        // Only horizontal delta affects velocity
+                        if (Math.abs(handX - 0.5) > deadZone) {
+                            // Non-linear response for smoother slow movement
+                            const delta = handX - 0.5;
+                            const sign = Math.sign(delta);
+                            const mag = Math.abs(delta) - deadZone;
+                            
+                            AppState.scrollVelocity += sign * Math.pow(mag, 1.5) * sensitivity;
+                        }
+                        
+                        // Clamp velocity
+                        if (Math.abs(AppState.scrollVelocity) > 0.8) {
+                            AppState.scrollVelocity = 0.8 * Math.sign(AppState.scrollVelocity);
+                        }
+                    } 
+                    else if (AppState.gesture === 'FIST') {
+                        // Select
+                        selectCard();
+                    }
+                } else if (AppState.mode === 'REVEALED') {
+                    // RESET LOGIC: FIST + MOVE BACK (Palm getting smaller)
+                    
+                    const timeSinceReveal = Date.now() - (AppState.revealTime || 0);
+                    if (timeSinceReveal > 2000) { 
+                         // Check depth movement
+                         // palmSize decreases as hand moves away
+                         const sizeDelta = palmSize - AppState.lastPalmSize;
+                         const moveThreshold = -0.002; // Negative means getting smaller
+                         
+                         if (AppState.gesture === 'FIST' && sizeDelta < moveThreshold) {
+                             resetApp();
+                         }
+                    }
+                }
+                
+                AppState.lastPalmSize = palmSize;
+                
+            } else {
+                AppState.handDetected = false;
+                cursor.classList.remove('active');
+            }
+        }
+
+        function enterSpreadMode() {
+            AppState.mode = 'SPREAD';
+            AppState.scrollOffset = 39; // Start in middle of deck
+            gsap.to(camera.position, { z: 40, y: 0, duration: 1.5 });
+        }
+
+        function selectCard() {
+            if (AppState.mode !== 'SPREAD') return;
+            AppState.mode = 'REVEALING';
+            selectorGroup.visible = false;
+
+            AppState.revealedCardIndex = AppState.selectedIndex;
+            const targetCard = cards[AppState.revealedCardIndex];
+            
+            // Generate texture just in time
+            const frontTex = createFrontTexture(AppState.revealedCardIndex);
+            targetCard.material[4].map = frontTex; // Assign to front face
+            targetCard.material[4].needsUpdate = true;
+
+            // Animate others away
+            cards.forEach((c, i) => {
+                if (i !== AppState.revealedCardIndex) {
+                    gsap.to(c.material, { opacity: 0, duration: 1 }); // Fade out requires transparent material, currently standard.
+                    // Instead move them back and down
+                    gsap.to(c.position, { z: -50, y: -20, duration: 1, delay: Math.random() * 0.2 });
+                }
+            });
+
+            // Animate Target
+            // 1. Rise
+            const timeline = gsap.timeline({
+                onComplete: () => {
+                    AppState.mode = 'REVEALED';
+                    AppState.revealTime = Date.now();
+                    // Apply Blur to background scene (simulated by blurring canvas container or overlay)
+                    // We can't easily blur the Three.js scene selectively without post-processing composer.
+                    // We will just focus on the card.
+                    showCardUI();
+                }
+            });
+
+            timeline.to(targetCard.position, { x: 0, y: 0, z: 15, duration: 1.5, ease: "power2.out" }); // Smaller Z for smaller look
+            timeline.to(targetCard.rotation, { y: 0, z: 0, duration: 1, ease: "back.out(1.2)" }, "-=1.0"); // Flip
+
+            // Particles Burst
+            spawnBurst(targetCard.position);
+        }
+
+        function spawnBurst(pos) {
+            // Add momentary burst - Impactful
+            const burstGeo = new THREE.BufferGeometry();
+            const count = 2000; // Increased count
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const velocities = [];
+            
+            const c1 = new THREE.Color(0xffd700); // Gold
+            const c2 = new THREE.Color(0xffffff); // White
+            const c3 = new THREE.Color(0x00ffff); // Cyan accent
+            
+            for(let i=0; i<count; i++) {
+                positions[i*3] = pos.x;
+                positions[i*3+1] = pos.y;
+                positions[i*3+2] = pos.z;
+                
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+                const speed = 0.5 + Math.random() * 2.0; // Faster explosion
+                
+                velocities.push({
+                    x: Math.sin(phi) * Math.cos(theta) * speed,
+                    y: Math.sin(phi) * Math.sin(theta) * speed,
+                    z: Math.cos(phi) * speed
+                });
+                
+                // Random color mix
+                const r = Math.random();
+                let chosen = c1;
+                if (r > 0.6) chosen = c2;
+                else if (r > 0.9) chosen = c3;
+                
+                colors[i*3] = chosen.r;
+                colors[i*3+1] = chosen.g;
+                colors[i*3+2] = chosen.b;
+            }
+            burstGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            burstGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            // Create soft glow texture for burst
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(16,16,0,16,16,16);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,32,32);
+            const burstTex = new THREE.CanvasTexture(canvas);
+            
+            const burstMat = new THREE.PointsMaterial({ 
+                vertexColors: true,
+                size: 1.2, // Larger size
+                map: burstTex, 
+                transparent: true,
+                opacity: 1.0,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            const burstSystem = new THREE.Points(burstGeo, burstMat);
+            scene.add(burstSystem);
+            
+            // Shockwave Ring
+            const ringGeo = new THREE.RingGeometry(0.1, 0.5, 64);
+            const ringMat = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff, 
+                transparent: true, 
+                opacity: 0.8, 
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+            const shockwave = new THREE.Mesh(ringGeo, ringMat);
+            shockwave.position.copy(pos);
+            shockwave.lookAt(camera.position); 
+            scene.add(shockwave);
+            
+            // Animate burst
+            let frame = 0;
+            function animateBurst() {
+                if (frame > 100) { 
+                    scene.remove(burstSystem);
+                    scene.remove(shockwave);
+                    return;
+                }
+                
+                // Particles
+                const posAttr = burstSystem.geometry.attributes.position;
+                for(let i=0; i<count; i++) {
+                    posAttr.setXYZ(i, 
+                        posAttr.getX(i) + velocities[i].x,
+                        posAttr.getY(i) + velocities[i].y,
+                        posAttr.getZ(i) + velocities[i].z
+                    );
+                    // Drag
+                    velocities[i].x *= 0.92;
+                    velocities[i].y *= 0.92;
+                    velocities[i].z *= 0.92;
+                }
+                posAttr.needsUpdate = true;
+                burstMat.opacity -= 0.01;
+                
+                // Shockwave expansion
+                const scale = 1 + frame * 2;
+                shockwave.scale.set(scale, scale, 1);
+                shockwave.material.opacity -= 0.02;
+                
+                frame++;
+                requestAnimationFrame(animateBurst);
+            }
+            animateBurst();
+        }
+
+        function showCardUI() {
+            const data = DECK_DATA[AppState.revealedCardIndex];
+            document.getElementById('card-name').innerText = data.name + " " + data.nameCN;
+            document.getElementById('card-keywords').innerText = data.keywords;
+            
+            const panel = document.getElementById('card-info-panel');
+            panel.classList.add('visible');
+        }
+
+        // Button Interaction
+        function checkButtonInteraction(cx, cy) {
+            const btn = document.getElementById('reset-btn');
+            const rect = btn.getBoundingClientRect();
+            const cursor = document.getElementById('virtual-cursor');
+            
+            if (cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom) {
+                cursor.classList.add('clicking');
+                if (!btn.hasAttribute('data-hover-start')) {
+                    btn.setAttribute('data-hover-start', Date.now());
+                    btn.classList.add('hover-state');
+                } else {
+                    const start = parseInt(btn.getAttribute('data-hover-start'));
+                    if (Date.now() - start > 800) { // 800ms dwell to click
+                        resetApp();
+                        btn.removeAttribute('data-hover-start');
+                        btn.classList.remove('hover-state');
+                    }
+                }
+            } else {
+                btn.removeAttribute('data-hover-start');
+                btn.classList.remove('hover-state');
+            }
+        }
+
+        function resetApp() {
+            if (AppState.mode === 'HOME') return;
+            
+            const panel = document.getElementById('card-info-panel');
+            panel.classList.remove('visible');
+            
+            const targetCard = cards[AppState.revealedCardIndex];
+            
+            // Reset Mode
+            AppState.mode = 'HOME';
+            AppState.scrollOffset = 0;
+            AppState.scrollVelocity = 0;
+            
+            // Reset Animation
+            // Fly card back to stack
+            gsap.to(targetCard.position, { x: 0, y: -2, z: -AppState.revealedCardIndex * 0.01, duration: 1.5 });
+            gsap.to(targetCard.rotation, { x: 0, y: Math.PI, z: (Math.random()-0.5)*0.05, duration: 1.5 });
+            
+            // Bring others back
+            cards.forEach((c, i) => {
+                 if (i !== AppState.revealedCardIndex) {
+                     gsap.to(c.position, { x: 0, y: -2, z: -i * 0.01, duration: 1.5, delay: 0.5 });
+                     c.rotation.y = Math.PI; // Reset rotations
+                 }
+            });
+            
+            // Reset Camera
+            gsap.to(camera.position, { z: 45, y: 0, duration: 1.5 });
+        }
+        
+        // Mouse/Touch Fallback for Debugging
+        // document.getElementById('reset-btn').addEventListener('click', resetApp);
+
+        // --- Initialization ---
+        
+        const videoElement = document.getElementById('input_video');
+        const hands = new Hands({locateFile: (file) => `./${file}`});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onHandResults);
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640, // Lower res for faster processing
+            height: 480
+        });
+
+        // Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+            
+            updateLayout(time);
+            
+            // Particles rotate & Twinkle
+            particleGroups.forEach((group, idx) => {
+                const speed = 0.02 + idx * 0.01;
+                group.rotation.y = time * speed * (idx % 2 === 0 ? 1 : -1);
+                
+                // Twinkle
+                group.material.opacity = 0.8 + Math.sin(time * 3 + idx) * 0.15;
+            });
+            magicCircleGroup.rotation.z = -time * 0.05; // Rotate Magic Circle
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+        cameraUtils.start();
+        
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Fullscreen Toggle
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Point Planet</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #video-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+            transform: scaleX(-1); /* Mirror effect */
+            filter: brightness(0.3) blur(5px); /* Darker and blurred background */
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* Hidden input video for processing, we use a separate one for background if needed or reuse */
+        #input_video {
+            display: none;
+        }
+        #video-container {
+            display: none; /* Hide the small corner video */
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script>
+      // Fix for Emscripten environment conflict
+      var Module = {
+        arguments: []
+      };
+    </script>
+    
+    <!-- MediaPipe Hands (Fully Local) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="./hands.js"></script>
+    <style>
+      /* Ensure video is loaded but hidden appropriately */
+      #input_video {
+        display: block; /* Make sure it's not display:none initially */
+      }
+    </style>
+</head>
+<body>
+
+    <div id="loading">Loading AI Model...</div>
+    <div id="error-message" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,0,0,0.8); color: white; padding: 20px; border-radius: 8px; z-index: 100; text-align: center; max-width: 80%;"></div>
+    
+    <!-- Background Video -->
+    <video id="video-background" autoplay playsinline muted></video>
+    
+    <!-- Fullscreen Button (Icon) -->
+    <button id="fullscreen-btn" style="position: absolute; top: 20px; right: 20px; z-index: 100; background: transparent; border: none; cursor: pointer; opacity: 0.8; transition: opacity 0.3s;">
+        <svg id="fs-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 8V4H8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 8V4H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 16V20H8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 16V20H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </button>
+    
+    <div id="canvas-container"></div>
+    
+    <!-- Hidden video element for MediaPipe processing (can reuse background video but safer to keep separate for logic) -->
+    <video id="input_video" autoplay playsinline style="display:none"></video>
+
+    <script>
+        // --- Configuration ---
+        const CONFIG = {
+            planet: {
+                radius: 100,
+                particleCount: 8000,
+                color: 0xffaa33, // Orange
+                size: 4.5
+            },
+            rings: {
+                innerRadius: 140,
+                outerRadius: 240,
+                particleCount: 5000,
+                color: 0xffffff,
+                size: 3.0
+            },
+            camera: {
+                minDistance: 120,
+                maxDistance: 900,
+                initialDistance: 500,
+                fov: 60
+            }
+        };
+
+        // --- Error Handling & Diagnostics ---
+        function showError(msg) {
+            const el = document.getElementById('error-message');
+            el.style.display = 'block';
+            el.innerHTML = `<h3>Camera Error</h3><p>${msg}</p><p>Ensure you are accessing via <b>http://localhost:8000</b> or <b>HTTPS</b>.</p>`;
+            document.getElementById('loading').style.display = 'none';
+            console.error(msg);
+        }
+
+        async function checkCameraPermission() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showError("Browser API 'navigator.mediaDevices.getUserMedia' is missing. <br>This usually happens when opening via <code>file://</code> or non-secure HTTP.");
+                return false;
+            }
+            try {
+                // Get stream once and share it
+                const stream = await navigator.mediaDevices.getUserMedia({ video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }});
+                
+                // Set stream to both hidden processing video and background video
+                videoElement.srcObject = stream;
+                backgroundVideo.srcObject = stream;
+                
+                return true;
+            } catch (err) {
+                let niceMsg = err.message;
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    niceMsg = "Permission denied. Please allow camera access in browser settings.";
+                } else if (err.name === 'NotFoundError') {
+                    niceMsg = "No camera device found.";
+                }
+                showError(`${err.name}: ${niceMsg}`);
+                return false;
+            }
+        }
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        // Add subtle fog for depth
+        scene.fog = new THREE.FogExp2(0x000000, 0.001);
+
+        const camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.z = CONFIG.camera.initialDistance;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ReinhardToneMapping; // Add tone mapping for better glow
+        renderer.toneMappingExposure = 1.5; // Boost exposure
+        container.appendChild(renderer.domElement);
+
+        // --- Particle System Helpers ---
+        
+        // Create a glow texture programmatically - More intense core
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; // Higher res
+            canvas.height = 64;
+            const context = canvas.getContext('2d');
+            const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+            // Whiter core, sharper falloff for "sparkle"
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 64, 64);
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+        
+        const particleTexture = createGlowTexture();
+
+        // 1. Planet Particles
+        const planetGeometry = new THREE.BufferGeometry();
+        const planetPositions = [];
+        
+        for (let i = 0; i < CONFIG.planet.particleCount; i++) {
+            // Random point in sphere, but biased towards surface
+            // r = R * cbrt(random) gives uniform distribution inside sphere
+            // To bias towards surface, we can use a higher power or mix distributions
+            
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi = Math.acos(2 * v - 1);
+            
+            // Bias towards surface: mostly near radius, some inside
+            const rBias = Math.random() > 0.3 ? 1 : Math.pow(Math.random(), 0.5); 
+            const r = CONFIG.planet.radius * rBias;
+
+            const x = r * Math.sin(phi) * Math.cos(theta);
+            const y = r * Math.sin(phi) * Math.sin(theta);
+            const z = r * Math.cos(phi);
+            
+            planetPositions.push(x, y, z);
+        }
+        
+        planetGeometry.setAttribute('position', new THREE.Float32BufferAttribute(planetPositions, 3));
+        const planetMaterial = new THREE.PointsMaterial({
+            color: CONFIG.planet.color,
+            size: CONFIG.planet.size,
+            map: particleTexture,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true
+        });
+        const planet = new THREE.Points(planetGeometry, planetMaterial);
+        scene.add(planet);
+
+        // 2. Ring Particles
+        const ringGeometry = new THREE.BufferGeometry();
+        const ringPositions = [];
+        
+        for (let i = 0; i < CONFIG.rings.particleCount; i++) {
+            // Ring distribution
+            const angle = Math.random() * Math.PI * 2;
+            // Random radius between inner and outer
+            const r = CONFIG.rings.innerRadius + Math.random() * (CONFIG.rings.outerRadius - CONFIG.rings.innerRadius);
+            
+            // Add some noise to height (y-axis) to give volume
+            const y = (Math.random() - 0.5) * 10;
+            const x = r * Math.cos(angle);
+            const z = r * Math.sin(angle);
+            
+            ringPositions.push(x, y, z);
+        }
+        
+        ringGeometry.setAttribute('position', new THREE.Float32BufferAttribute(ringPositions, 3));
+        const ringMaterial = new THREE.PointsMaterial({
+            color: CONFIG.rings.color,
+            size: CONFIG.rings.size,
+            map: particleTexture,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.8
+        });
+        const rings = new THREE.Points(ringGeometry, ringMaterial);
+        
+        // Tilt the rings slightly
+        rings.rotation.x = Math.PI / 6; 
+        rings.rotation.z = Math.PI / 8;
+        
+        scene.add(rings);
+
+        // Add a central light
+        const pointLight = new THREE.PointLight(0xffaa00, 2, 600);
+        pointLight.position.set(0, 0, 0);
+        scene.add(pointLight);
+
+        // --- Interaction Logic (State) ---
+        const state = {
+            targetCameraDistance: CONFIG.camera.initialDistance,
+            targetRotationY: 0,
+            currentRotationY: 0,
+            handDetected: false,
+            gesture: 'NONE' // 'OPEN', 'FIST'
+        };
+
+        // --- MediaPipe Hands ---
+        // We now use video-background for display, and input_video for processing (or we can just link them)
+        const videoElement = document.getElementById('input_video');
+        const backgroundVideo = document.getElementById('video-background');
+        const loadingElement = document.getElementById('loading');
+
+        function onResults(results) {
+            loadingElement.style.display = 'none';
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                state.handDetected = true;
+                const landmarks = results.multiHandLandmarks[0]; // Use first hand
+                
+                // 1. Calculate Hand Rotation (Roll)
+                // Use Index Finger MCP (5) and Pinky MCP (17)
+                const p5 = landmarks[5];
+                const p17 = landmarks[17];
+                
+                // Calculate angle in radians. 
+                // Note: MediaPipe coords: x (0-1), y (0-1). y increases downwards.
+                // We want to map hand rotation to planet rotation.
+                // If hand is horizontal, angle is ~0.
+                const dx = p17.x - p5.x;
+                const dy = p17.y - p5.y;
+                let angle = Math.atan2(dy, dx); 
+                
+                // Normalize angle or map it directly to rotation speed
+                // Let's make it map directly to rotation for "sync" feeling
+                // But we need continuous rotation usually. 
+                // "The camera will rotate with it. Just like the planet is rotating synchronously"
+                // This implies absolute mapping: Hand Angle -> Camera Angle
+                // Default hand position (horizontal) -> angle ~ 0
+                // state.targetRotationY = angle * 2.5; // Moved to update logic for centralization
+                
+                // 2. Gesture & Distance Control
+                // Calculate palm size (distance between wrist 0 and middle finger mcp 9)
+                const p0 = landmarks[0];
+                const p9 = landmarks[9];
+                const palmSize = Math.sqrt(Math.pow(p9.x - p0.x, 2) + Math.pow(p9.y - p0.y, 2));
+                
+                // Check if fist or open
+                // Simple heuristic: average distance of finger tips to wrist
+                const tips = [8, 12, 16, 20];
+                let avgTipDist = 0;
+                for (let idx of tips) {
+                    const tip = landmarks[idx];
+                    avgTipDist += Math.sqrt(Math.pow(tip.x - p0.x, 2) + Math.pow(tip.y - p0.y, 2));
+                }
+                avgTipDist /= 4;
+                
+                // Thresholds need tuning based on palmSize to be scale-invariant
+                const openness = avgTipDist / palmSize; 
+                
+                const isFist = openness < 0.9; // Heuristic
+                const isOpen = openness > 1.3; // Heuristic
+                
+                // Store previous palm size for delta
+                if (!state.lastPalmSize) state.lastPalmSize = palmSize;
+                
+                const deltaSize = palmSize - state.lastPalmSize;
+                
+                // Update Logic
+                // Larger palmSize = Closer hand
+                // Fist + Pull Away (palmSize decreases) -> Camera Moves Away (distance increases)
+                // Open + Push In (palmSize increases) -> Camera Moves Closer (distance decreases)
+                
+                const BASE_SENSITIVITY = 1500; // Reduced from 3000 for smoother control
+                const ROTATION_SENSITIVITY = 1.2; // Reduced from 2.5
+                
+                // Calculate normalized distance factor (0 at min, 1 at max)
+                const distFactor = (state.targetCameraDistance - CONFIG.camera.minDistance) / (CONFIG.camera.maxDistance - CONFIG.camera.minDistance);
+
+                if (isFist && deltaSize < -0.002) {
+                    // Hand moving away -> Camera moves away
+                    const speedMultiplier = 1 + (distFactor * 2); // 1x to 3x speed
+                    const speed = Math.abs(deltaSize) * BASE_SENSITIVITY * speedMultiplier; 
+                    state.targetCameraDistance += speed;
+                } else if (isOpen && deltaSize > 0.002) {
+                    // Hand moving closer -> Camera moves closer
+                    const speedMultiplier = 0.5 + (distFactor * 2.5); // 0.5x to 3x speed
+                    const speed = Math.abs(deltaSize) * BASE_SENSITIVITY * speedMultiplier;
+                    state.targetCameraDistance -= speed;
+                }
+                
+                // Rotation Smoothing
+                state.targetRotationY = angle * ROTATION_SENSITIVITY;
+                
+                // Allow "zooming out" further to see wider view
+                // We dynamically adjust maxDistance if user really wants to pull back
+                if (state.targetCameraDistance > CONFIG.camera.maxDistance - 50) {
+                     CONFIG.camera.maxDistance += 10;
+                }
+                
+                state.lastPalmSize = palmSize;
+
+            } else {
+                state.handDetected = false;
+                state.lastPalmSize = null;
+                // Auto rotate when no hand? Or stay still?
+                // Let's add a slow auto-rotation for aesthetics
+                state.targetRotationY += 0.001;
+            }
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            console.log("Locating file:", file);
+            // Force ALL files to be loaded from current directory
+            return `./${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        
+        // Initialize explicitly
+        hands.initialize().then(() => {
+             console.log("MediaPipe Hands initialized");
+             loadingElement.innerText = "Model Loaded. Starting Camera...";
+        }).catch(err => {
+             console.error(err);
+             showError("MediaPipe Initialization Error: " + err.message);
+        });
+
+        hands.onResults(onResults);
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                try {
+                    await hands.send({image: videoElement});
+                } catch (e) {
+                    // Log but don't stop everything if a single frame fails
+                    console.warn("MediaPipe send error:", e);
+                }
+            },
+            width: 1280,
+            height: 720
+        });
+
+        // Initialize with error check
+        checkCameraPermission().then(hasPermission => {
+            if (hasPermission) {
+                // We manually started the stream in checkCameraPermission, so we just start the MediaPipe camera utility
+                // But Camera utils might try to getUserMedia again if we don't pass the stream?
+                // Actually MediaPipe Camera utility is a wrapper around getUserMedia.
+                // Since we manually set srcObject, we can just play the video and call onFrame manually loop?
+                // Or let Camera util handle it.
+                // Let's rely on Camera util but we need to ensure background gets it too.
+                
+                // Better approach: Let's NOT use Camera util for the stream, just for the loop.
+                // Or just start it.
+                cameraUtils.start().catch(err => {
+                     // Ignore "video already playing" type errors
+                     console.log("Camera start info:", err);
+                });
+            }
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Smooth Camera Orbit (Rotation)
+            // Interpolate current rotation towards target
+            state.currentRotationY += (state.targetRotationY - state.currentRotationY) * 0.1;
+            
+            const r = camera.position.distanceTo(new THREE.Vector3(0,0,0)); // Current actual radius (or target?)
+            // We need to maintain the current 'zoom' distance but rotate around Y
+            // But we actually update camera.position.z for zoom, so we need to mix them.
+            // Simplest: Keep camera on X-Z plane, rotate the Scene? 
+            // Or rotate Camera around Scene.
+            // Let's rotate the Camera Orbit.
+            
+            // 2. Smooth Camera Zoom
+            // Clamp target distance
+            state.targetCameraDistance = Math.max(CONFIG.camera.minDistance, Math.min(CONFIG.camera.maxDistance, state.targetCameraDistance));
+            
+            // Lerp current distance
+            // We calculate the current distance from origin
+            const currentDist = camera.position.distanceTo(new THREE.Vector3(0,0,0));
+            const newDist = THREE.MathUtils.lerp(currentDist, state.targetCameraDistance, 0.05);
+            
+            // Update Camera Position
+            // x = dist * sin(theta)
+            // z = dist * cos(theta)
+            camera.position.x = newDist * Math.sin(state.currentRotationY);
+            camera.position.z = newDist * Math.cos(state.currentRotationY);
+            camera.lookAt(0, 0, 0);
+
+            // 3. Planet/Ring Self-Rotation (Animation)
+            planet.rotation.y += 0.002;
+            rings.rotation.y -= 0.001;
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Fullscreen Logic
+        const fsBtn = document.getElementById('fullscreen-btn');
+        const fsIcon = document.getElementById('fs-icon');
+        
+        // Icons
+        const iconEnter = `
+            <path d="M4 8V4H8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 8V4H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 16V20H8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 16V20H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        `;
+        const iconExit = `
+             <path d="M8 4V8H4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+             <path d="M16 4V8H20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+             <path d="M8 20V16H4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+             <path d="M16 20V16H20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        `;
+
+        fsBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+                fsIcon.innerHTML = iconExit;
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                    fsIcon.innerHTML = iconEnter;
+                }
+            }
+        });
+        
+        // Listen for escape key or other exit methods
+        document.addEventListener('fullscreenchange', () => {
+             if (!document.fullscreenElement) {
+                 fsIcon.innerHTML = iconEnter;
+             } else {
+                 fsIcon.innerHTML = iconExit;
+             }
+        });
+
+        animate();
+
+    </script>
+</body>
+</html>
+
