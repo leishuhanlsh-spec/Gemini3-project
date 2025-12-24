@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Christmas Experience</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Times+New+Roman&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000000;
+            font-family: 'Times New Roman', serif;
+            color: #fceea7;
+        }
+
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 1s ease-out;
+        }
+
+        .loading-particles {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .particle {
+            position: absolute;
+            background: #fceea7;
+            border-radius: 50%;
+            opacity: 0.6;
+            animation: float 5s infinite ease-in-out;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0); }
+            50% { transform: translateY(-20px) translateX(10px); }
+        }
+
+        .loader-icon {
+            width: 80px;
+            height: 80px;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        /* Abstract Tree CSS Animation */
+        .tree-shape {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 30px solid transparent;
+            border-right: 30px solid transparent;
+            border-bottom: 60px solid #d4af37;
+            filter: drop-shadow(0 0 10px #d4af37);
+            animation: glow 2s infinite alternate;
+        }
+        
+        .tree-layer-2 {
+            border-bottom: 45px solid #d4af37;
+            bottom: 25px;
+            border-left: 22px solid transparent;
+            border-right: 22px solid transparent;
+        }
+
+        .gift-shape {
+            position: absolute;
+            bottom: -10px;
+            left: 60%;
+            width: 15px;
+            height: 15px;
+            background: #800020; /* Wine red */
+            box-shadow: 0 0 5px #800020;
+        }
+
+        .loading-text {
+            font-family: 'Cinzel', serif;
+            font-size: 24px;
+            color: #d4af37;
+            letter-spacing: 4px;
+            text-shadow: 0 0 10px rgba(212, 175, 55, 0.5);
+            animation: textFade 2s infinite alternate;
+        }
+
+        @keyframes glow {
+            from { filter: drop-shadow(0 0 5px #d4af37); }
+            to { filter: drop-shadow(0 0 20px #fceea7); }
+        }
+
+        @keyframes textFade {
+            from { opacity: 0.6; }
+            to { opacity: 1; }
+        }
+
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(252, 238, 167, 0.5);
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #camera-feed {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 1px solid #333;
+            transform: scaleX(-1);
+            opacity: 0.5;
+            z-index: 10;
+            border-radius: 8px;
+        }
+    </style>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+        }
+    }
+    </script>
+</head>
+<body>
+
+    <div id="loading-screen">
+        <div class="loading-particles" id="lp-container"></div>
+        <div class="loader-icon">
+            <div class="tree-shape"></div>
+            <div class="tree-shape tree-layer-2"></div>
+            <div class="gift-shape"></div>
+        </div>
+        <div class="loading-text">MERRY CHRISTMAS</div>
+    </div>
+
+    <div id="info">
+        Open Hand: Fireworks | Fist: Crystal Ball | Move Hand: Rotate/Zoom
+    </div>
+
+    <video id="camera-feed" autoplay playsinline muted></video>
+
+    <script>
+        // Global error handler - defined outside module to catch syntax errors
+        window.onerror = function(msg, url, line, col, error) {
+            const div = document.createElement('div');
+            div.style.position = 'fixed';
+            div.style.top = '0';
+            div.style.left = '0';
+            div.style.background = 'rgba(255,0,0,0.9)';
+            div.style.color = 'white';
+            div.style.padding = '20px';
+            div.style.zIndex = '10000';
+            div.style.fontFamily = 'monospace';
+            div.innerHTML = `<strong>Error:</strong> ${msg}<br><strong>Line:</strong> ${line}`;
+            document.body.appendChild(div);
+            // Force remove loader if error occurs
+            const loader = document.getElementById('loading-screen');
+            if(loader) loader.style.display = 'none';
+            return false;
+        };
+
+        // Safety Net: Force remove loader after 5 seconds
+        setTimeout(() => {
+            const loader = document.getElementById('loading-screen');
+            if(loader && loader.style.opacity !== '0' && loader.style.display !== 'none') {
+                console.warn("Loader timeout - Forcing removal");
+                loader.style.opacity = 0;
+                setTimeout(() => loader.remove(), 1000);
+                const info = document.getElementById('info');
+                if(info) info.innerHTML += " <br><span style='color:orange'>(Simulation Mode Active - Loader Timeout)</span>";
+            }
+        }, 5000);
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+
+        // --- Configuration ---
+        const SPHERE_COUNT = 10000;
+        const BOX_COUNT = 5000;
+        const TREE_PARTICLE_COUNT = SPHERE_COUNT + BOX_COUNT;
+        const FIREWORK_COUNT = 3000;
+        const PARTICLE_COUNT = TREE_PARTICLE_COUNT + FIREWORK_COUNT;
+        
+        const COLORS = {
+            gold: new THREE.Color(0xd4af37),
+            cream: new THREE.Color(0xfceea7),
+            red: new THREE.Color(0xff0000),
+            green: new THREE.Color(0x00ff00),
+            blue: new THREE.Color(0x0000ff),
+            purple: new THREE.Color(0x800080),
+            wine: new THREE.Color(0x800020),
+            white: new THREE.Color(0xffffff)
+        };
+
+        // --- State ---
+        const STATE = {
+            mode: 0, // 0: Idle, 1: Tree, 2: Fireworks, 3: Crystal Ball
+            targetRotation: { x: 0, y: 0 },
+            targetZoom: 65,
+            handPresent: false,
+            treeGrowth: 0, // 0 to 1
+            starTargetY: 20 // Dynamic star height
+        };
+
+        // --- Setup Scene ---
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 65); // Move back and slightly down to center tree
+        camera.lookAt(0, 0, 0);
+
+        const scene = new THREE.Scene();
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMappingExposure = 2.2;
+        container.appendChild(renderer.domElement);
+
+        // Environment & Lighting
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffaa00, 2, 100);
+        pointLight.position.set(0, 10, 0);
+        scene.add(pointLight);
+
+        const spotLightGold = new THREE.SpotLight(0xd4af37, 1200);
+        spotLightGold.position.set(30, 40, 40);
+        spotLightGold.angle = 0.5;
+        spotLightGold.penumbra = 0.5;
+        scene.add(spotLightGold);
+
+        // Removed Blue Spotlight to avoid confusion with particles
+        const rimLight = new THREE.SpotLight(0xffffff, 400);
+        rimLight.position.set(-30, 20, -30);
+        rimLight.angle = 0.5;
+        rimLight.penumbra = 0.5;
+        scene.add(rimLight);
+
+        // Post-Processing
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.2;
+        bloomPass.strength = 1.5;
+        bloomPass.radius = 0.5;
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- Particle System ---
+        // Using InstancedMesh for performance
+        const material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.1,
+            metalness: 0.8,
+            emissive: 0x000000
+        });
+
+        // 1. Sphere Mesh
+        const sphereGeo = new THREE.SphereGeometry(0.08, 8, 8); 
+        // We need more capacity for fireworks
+        const totalSphere = SPHERE_COUNT + FIREWORK_COUNT;
+        const sphereMesh = new THREE.InstancedMesh(sphereGeo, material, totalSphere);
+        sphereMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        sphereMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(totalSphere * 3), 3);
+        scene.add(sphereMesh);
+
+        // 2. Box Mesh
+        const boxGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+        const boxMesh = new THREE.InstancedMesh(boxGeo, material, BOX_COUNT);
+        boxMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        boxMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(BOX_COUNT * 3), 3);
+        scene.add(boxMesh);
+
+        // Data arrays to store particle states
+        const positions = []; // Array of {x, y, z} for current mode target
+        const currentPositions = []; // Current animation state
+        const colors = []; 
+        const phases = []; // For wave animations
+        const fireworkData = []; // { velocity: Vector3, active: bool, life: number }
+
+        // Initialize particles
+        const dummy = new THREE.Object3D();
+        const _color = new THREE.Color();
+
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+            currentPositions.push({ x: 0, y: -100, z: 0 }); // Start hidden
+            positions.push({ x: 0, y: 0, z: 0 }); // Target
+            colors.push({ r: 1, g: 1, b: 1 });
+            phases.push(Math.random() * Math.PI * 2);
+            fireworkData.push({ 
+                velocity: new THREE.Vector3(), 
+                active: false, 
+                life: 0,
+                type: 'none' // 'firework', 'snow', 'static', 'ornament'
+            });
+        }
+
+        // --- Geometry Generation Logic ---
+
+        function generateSpiralTree() {
+            const tempPos = [];
+            const tempCol = [];
+            
+            // Tree Config
+            const levels = 7; 
+            const treeHeight = 40;
+            const maxRadius = 15; // Slightly tighter
+            const yBottom = -treeHeight / 2; 
+            const levelHeight = treeHeight / levels; 
+            
+            // We only use TREE_PARTICLE_COUNT for the tree
+            // Firework particles stay hidden until used
+            
+            const splitIndex = Math.floor(TREE_PARTICLE_COUNT * 0.65); 
+            
+            let maxTreeY = yBottom;
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                let x = 0, y = -100, z = 0, c = COLORS.white;
+
+                // If this is a dedicated firework particle, hide it by default
+                if (i >= TREE_PARTICLE_COUNT) {
+                    tempPos.push({ x:0, y:-100, z:0 });
+                    tempCol.push(COLORS.white);
+                    continue;
+                }
+
+                if (i < splitIndex) {
+                    // --- Green Layered Tree ---
+                    const levelIdx = Math.floor(Math.pow(Math.random(), 0.6) * levels); 
+                    
+                    // Gap management: COMPACT
+                    const layerBottomY = yBottom + (levels - 1 - levelIdx) * levelHeight * 0.95; // 0.95 compacts them
+                    const layerHeightEffective = levelHeight * 1.1; // Slight overlap to fill gaps
+                    
+                    const hInLayer = Math.random(); 
+                    y = layerBottomY + hInLayer * layerHeightEffective;
+                    
+                    // Update Max Y for star
+                    if(y > maxTreeY) maxTreeY = y;
+
+                    // Radius logic 
+                    const thisLayerMaxR = maxRadius * ((levelIdx + 1.2) / levels); 
+                    const thisLayerMinR = maxRadius * (levelIdx / levels) * 0.3; // Taper top
+                    
+                    const maxRAtY = thisLayerMinR + (thisLayerMaxR - thisLayerMinR) * (1 - hInLayer);
+                    
+                    // Volume fill
+                    const r = Math.sqrt(Math.random()) * maxRAtY;
+                    const theta = Math.random() * Math.PI * 2;
+                    
+                    x = r * Math.cos(theta);
+                    z = r * Math.sin(theta);
+                    
+                    const droop = (r / maxRAtY) * 0.5;
+                    y -= droop;
+
+                    c = COLORS.green;
+                    if (Math.random() > 0.7) c = new THREE.Color(0x2e8b57); 
+
+                } else {
+                     // --- Golden Spiral ---
+                     const progress = (i - splitIndex) / (TREE_PARTICLE_COUNT - splitIndex);
+                     const angle = progress * Math.PI * 2 * 6.0; 
+                     y = yBottom + progress * treeHeight;
+                     
+                     if(y > maxTreeY) maxTreeY = y;
+
+                     const layerSize = 1/levels;
+                     const layerPhase = (progress % layerSize) / layerSize; 
+                     const bump = Math.sin(layerPhase * Math.PI) * 0.5;
+
+                     const envR = maxRadius * (1 - progress) + 1.5 + bump; 
+                     
+                     const wave1 = Math.sin(progress * 15) * 0.5;
+                     const wave2 = Math.cos(angle * 3) * 0.3;
+                     
+                     const rBase = envR + wave1 + wave2;
+                     const widthSpread = (Math.random() - 0.5) * 2.0; 
+                     const r = rBase + widthSpread;
+                     
+                     y += (Math.random() - 0.5) * 1.0;
+                     
+                     x = r * Math.cos(angle);
+                     z = r * Math.sin(angle);
+                     
+                     c = COLORS.gold;
+                     if(Math.random() > 0.85) c = COLORS.cream;
+                }
+                
+                tempPos.push({x, y, z});
+                tempCol.push(c);
+            }
+            
+            // Set dynamic star target
+            STATE.starTargetY = maxTreeY + 1.5;
+
+            return { pos: tempPos, col: tempCol };
+        }
+
+        function generateCrystalBall() {
+            const tempPos = [];
+            const tempCol = [];
+            
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                let x, y, z;
+                let c = COLORS.white;
+                
+                const isBox = i >= SPHERE_COUNT;
+
+                if (isBox) {
+                    // Boxes: Gifts or Tree parts
+                    const r = Math.random();
+                    if (r < 0.2) { // Gifts (Red/Gold Cubes)
+                        // Cube pile under tree 2
+                        x = 5 + (Math.random() - 0.5) * 4;
+                        z = 5 + (Math.random() - 0.5) * 4;
+                        y = -8 + Math.random() * 3;
+                        c = Math.random() > 0.5 ? COLORS.red : COLORS.gold;
+                    } else { 
+                        // Mix into Trees (Green)
+                        const treeIdx = r < 0.6 ? 1 : 2;
+                        const tr = Math.random(); // height ratio
+                        const th = tr * (treeIdx === 1 ? 12 : 10);
+                        const trad = (1 - tr) * (treeIdx === 1 ? 4 : 3.5);
+                        const tang = Math.random() * Math.PI * 2;
+                        
+                        const offsetX = treeIdx === 1 ? -5 : 5;
+                        const offsetZ = treeIdx === 1 ? -5 : 5;
+
+                        x = Math.cos(tang) * trad + offsetX;
+                        z = Math.sin(tang) * trad + offsetZ;
+                        y = th - 8;
+                        c = COLORS.green;
+                    }
+                } else {
+                    // Spheres: Snow, Ground, Trees
+                    const r = Math.random();
+                    if (r < 0.3) { // Floating Snow
+                         // Sphere surface + volume
+                        const phi = Math.acos(-1 + (2 * Math.random()));
+                        const theta = Math.sqrt(PARTICLE_COUNT * Math.PI) * phi;
+                        const rad = 14 + (Math.random() * 0.5); 
+                        
+                        x = rad * Math.cos(theta) * Math.sin(phi);
+                        y = rad * Math.sin(theta) * Math.sin(phi);
+                        z = rad * Math.cos(phi);
+                        
+                        fireworkData[i].type = 'snow';
+                    } else if (r < 0.5) { // Ground
+                        x = (Math.random() - 0.5) * 20;
+                        z = (Math.random() - 0.5) * 20;
+                        y = -8 + Math.random() * 1.5;
+                    } else { // Trees
+                        const treeIdx = r < 0.75 ? 1 : 2;
+                        const tr = Math.random();
+                        const th = tr * (treeIdx === 1 ? 12 : 10);
+                        const trad = (1 - tr) * (treeIdx === 1 ? 4 : 3.5);
+                        const tang = Math.random() * Math.PI * 2;
+                        
+                        const offsetX = treeIdx === 1 ? -5 : 5;
+                        const offsetZ = treeIdx === 1 ? -5 : 5;
+
+                        x = Math.cos(tang) * trad + offsetX;
+                        z = Math.sin(tang) * trad + offsetZ;
+                        y = th - 8;
+                        c = COLORS.green;
+                    }
+                }
+
+                tempPos.push({ x, y, z });
+                tempCol.push(c);
+            }
+            return { pos: tempPos, col: tempCol };
+        }
+
+        // Firework logic
+        const fireworks = [];
+        class Firework {
+            constructor(startPos) {
+                this.particles = [];
+                const colorChoice = [COLORS.red, COLORS.gold, COLORS.purple, COLORS.blue];
+                this.color = colorChoice[Math.floor(Math.random() * colorChoice.length)];
+                
+                // Allocate indices from main pool that are currently free or steal them
+                // For simplicity in this demo, we'll just repurpose a slice of particles
+                // In a real robust system, we'd manage a pool.
+                // Here we will use a dedicated "Firework Mode" buffer in the update loop.
+            }
+        }
+
+        const starShape = new THREE.Shape();
+        // Standard 5-point star
+        const starOuterRad = 2.0;
+        const starInnerRad = 0.8; // More pointy
+        const starPoints = 5;
+        for (let i = 0; i < starPoints * 2; i++) {
+            const r = (i % 2 === 0) ? starOuterRad : starInnerRad;
+            // Rotate to point up (Math.PI/2 offset)
+            const a = (i / (starPoints * 2)) * Math.PI * 2 + Math.PI / 2; 
+            const x = Math.cos(a) * r;
+            const y = Math.sin(a) * r;
+            if (i === 0) starShape.moveTo(x, y);
+            else starShape.lineTo(x, y);
+        }
+        starShape.closePath();
+        
+        const extrudeSettings = { depth: 0.8, bevelEnabled: true, bevelSegments: 2, steps: 2, bevelSize: 0.1, bevelThickness: 0.2 };
+        const starGeo = new THREE.ExtrudeGeometry(starShape, extrudeSettings);
+        starGeo.center(); // Center geometry for rotation
+        const starMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 0.8, roughness: 0.2, metalness: 1.0 });
+        const starMesh = new THREE.Mesh(starGeo, starMat);
+        starMesh.position.y = 23; // Moved higher (Tree top is 20)
+        scene.add(starMesh);
+
+        // --- Main Animation Loop Logic ---
+        
+        // Mode Targets
+        let targetPositions = [];
+        let targetColors = [];
+
+        function updateTargets() {
+            let res;
+            
+            // Reset firework logic:
+            // For indices < TREE_PARTICLE_COUNT: Static tree/ribbon behavior.
+            // For indices >= TREE_PARTICLE_COUNT: Hidden firework particles.
+            for(let i=0; i<PARTICLE_COUNT; i++) {
+                fireworkData[i].type = 'static';
+                fireworkData[i].active = false;
+                
+                // If it's a dedicated firework particle, reset it to hidden state
+                if (i >= TREE_PARTICLE_COUNT) {
+                     fireworkData[i].type = 'firework_pool'; // Special tag for unused firework particles
+                }
+            }
+
+            const splitIndex = Math.floor(TREE_PARTICLE_COUNT * 0.65); 
+
+            // Mode 0: Idle / Hidden
+            if (STATE.mode === 0) {
+                 // All hidden
+                 targetPositions = new Array(PARTICLE_COUNT).fill({x:0, y:-100, z:0});
+                 targetColors = new Array(PARTICLE_COUNT).fill(COLORS.white);
+                 starMesh.visible = false;
+                 return;
+            }
+
+            if (STATE.mode === 1) { // Tree
+                res = generateSpiralTree();
+                starMesh.visible = true;
+                // Reset growth for animation
+                STATE.treeGrowth = 0; 
+            } else if (STATE.mode === 2) { // Fireworks (Base Tree + Active Fireworks)
+                res = generateSpiralTree(); // Base is tree
+                STATE.treeGrowth = 1; // Instant full tree in mode 2
+                
+                // Modifiers for Mode 2
+                 for(let i=0; i<TREE_PARTICLE_COUNT; i++) {
+                    // Identify if particle is part of Ribbon (i >= splitIndex)
+                    if(i >= splitIndex) {
+                        // Add Red Ornaments hanging on ribbon
+                        // Irregular, Few (e.g., 2%), Large
+                        if(Math.random() < 0.02) {
+                             res.col[i] = COLORS.red;
+                             // Mark as ornament for scaling in animate loop
+                             fireworkData[i].type = 'ornament';
+                        }
+                    }
+                 }
+                 starMesh.visible = true;
+            } else if (STATE.mode === 3) { // Crystal Ball
+                res = generateCrystalBall();
+                STATE.treeGrowth = 1; 
+                starMesh.visible = false;
+            }
+
+            targetPositions = res.pos;
+            targetColors = res.col;
+        }
+
+        // Initialize targets
+        updateTargets();
+
+        // Firework System State
+        let fireworkIndices = []; // Indices of particles currently acting as fireworks
+        
+        function spawnFirework() {
+            // Pick random position in upper half (Screen 1/2 approx)
+            // Tree is approx -20 to 20 height. Camera is at 65 z.
+            // Let's spawn them high up and around
+            const cx = (Math.random() - 0.5) * 50;
+            const cy = 10 + Math.random() * 25; // Upper half
+            const cz = (Math.random() - 0.5) * 40;
+            const center = new THREE.Vector3(cx, cy, cz);
+
+            const color = [COLORS.red, COLORS.gold, COLORS.blue, COLORS.purple][Math.floor(Math.random()*4)];
+            
+            // Allocate particles from dedicated pool
+            let foundCount = 0;
+            const targetCount = 300; // Big firework
+
+            // Search in dedicated firework pool range
+            for(let i = TREE_PARTICLE_COUNT; i < PARTICLE_COUNT; i++) {
+                if (foundCount >= targetCount) break;
+                
+                // If this particle is available (not currently active in another explosion)
+                if (!fireworkData[i].active) {
+                    fireworkData[i].type = 'firework';
+                    fireworkData[i].life = 1.0;
+                    fireworkData[i].active = true;
+                    
+                    // Set position to center
+                    currentPositions[i].x = center.x;
+                    currentPositions[i].y = center.y;
+                    currentPositions[i].z = center.z;
+
+                    // Random velocity sphere (larger explosion)
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const speed = 0.5 + Math.random() * 0.8; 
+                    
+                    fireworkData[i].velocity.set(
+                        speed * Math.sin(phi) * Math.cos(theta),
+                        speed * Math.sin(phi) * Math.sin(theta),
+                        speed * Math.cos(phi)
+                    );
+
+                    // We need to set the color directly in targetColors (and it will be lerped)
+                    // But for explosion we want instant color usually. 
+                    // Let's set current color directly for instant pop
+                    colors[i].r = color.r;
+                    colors[i].g = color.g;
+                    colors[i].b = color.b;
+                    
+                    targetColors[i] = color; // Maintain it
+                    
+                    foundCount++;
+                }
+            }
+        }
+
+        setInterval(() => {
+            if (STATE.mode === 2) spawnFirework();
+        }, 800);
+
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Lerp Camera & Scene Rotation
+            if (STATE.handPresent) {
+                // Smoothly interpolate rotation
+                scene.rotation.y += (STATE.targetRotation.y - scene.rotation.y) * 0.1;
+                scene.rotation.x += (STATE.targetRotation.x - scene.rotation.x) * 0.1;
+                
+                // Zoom
+                const currentDist = camera.position.length();
+                // Allow zooming out further to see full tree
+                const targetDist = THREE.MathUtils.clamp(STATE.targetZoom, 20, 90); 
+                const newDist = THREE.MathUtils.lerp(currentDist, targetDist, 0.1);
+                
+                // Maintain lookAt center while zooming
+                const dir = camera.position.clone().normalize();
+                camera.position.copy(dir.multiplyScalar(newDist));
+                camera.lookAt(0, 0, 0);
+
+            } else {
+                // Auto rotate if no hand
+                scene.rotation.y += 0.002;
+                // Return to default zoom
+                const currentDist = camera.position.length();
+                const newDist = THREE.MathUtils.lerp(currentDist, 65, 0.05); // Default back to 65
+                
+                const dir = camera.position.clone().normalize();
+                camera.position.copy(dir.multiplyScalar(newDist));
+                camera.lookAt(0, 0, 0);
+            }
+
+            // 2. Star Animation
+            if (starMesh.visible) {
+                // Check if tree is fully grown? Or animate star with tree
+                // Let's just place it at target height always, but maybe scale it with growth
+                starMesh.rotation.y += 0.02;
+                starMesh.rotation.z = Math.sin(Date.now() * 0.001) * 0.1;
+                starMesh.position.y = STATE.starTargetY; 
+                
+                // Hide star if growth is low
+                starMesh.scale.setScalar(STATE.treeGrowth < 0.8 ? 0 : 0.8);
+            }
+
+            // 3. Update Particles
+            const time = Date.now() * 0.001;
+            
+            // Tree Growth Logic
+            if (STATE.mode === 1 && STATE.treeGrowth < 1.0) {
+                STATE.treeGrowth += 0.01; // Grow speed
+            }
+            
+            // Helper to update a specific range of particles for a specific mesh
+            const updateMesh = (mesh, startIdx, endIdx, meshIdxOffset) => {
+                for (let i = startIdx; i < endIdx; i++) {
+                    // Logic index is i, Mesh index is (i - startIdx) if we were doing separate arrays, 
+                    // but here we just need to map correctly.
+                    // InstancedMesh expects index 0..N for *its* instances.
+                    const instanceIdx = i - meshIdxOffset;
+
+                    // Get target
+                    const tx = targetPositions[i].x;
+                    const ty = targetPositions[i].y;
+                    const tz = targetPositions[i].z;
+
+                    // Logic based on particle type
+                    if (fireworkData[i].type === 'firework' && fireworkData[i].active) {
+                        // Physics update
+                        fireworkData[i].velocity.y -= 0.015; // Gravity
+                        fireworkData[i].velocity.multiplyScalar(0.96); // Drag
+                        
+                        currentPositions[i].x += fireworkData[i].velocity.x;
+                        currentPositions[i].y += fireworkData[i].velocity.y;
+                        currentPositions[i].z += fireworkData[i].velocity.z;
+                        
+                        fireworkData[i].life -= 0.02;
+                        if(fireworkData[i].life <= 0) {
+                            fireworkData[i].active = false;
+                             // Reset to hidden
+                            currentPositions[i].y = -100;
+                        }
+                    } else if (fireworkData[i].type === 'snow') {
+                        // Browninan motion inside sphere
+                        currentPositions[i].y -= 0.05;
+                        currentPositions[i].x += Math.sin(time + i) * 0.02;
+                        currentPositions[i].z += Math.cos(time + i) * 0.02;
+
+                        // Reset if out of bounds (approximate sphere)
+                        if (currentPositions[i].y < -12) {
+                            currentPositions[i].y = 12;
+                        }
+                    } else if (i < TREE_PARTICLE_COUNT) { 
+                        // Only animate tree particles with growth logic
+                        
+                        // Normal Lerp to target
+                        let noiseX = 0, noiseY = 0, noiseZ = 0;
+                        if (STATE.mode === 1 || STATE.mode === 2) {
+                            noiseX = Math.sin(time * 2 + ty * 0.5) * 0.1;
+                            noiseZ = Math.cos(time * 2 + ty * 0.5) * 0.1;
+                        }
+
+                        // Growth Masking:
+                        // Calculate normalized height of this particle relative to tree
+                        // Tree is approx -20 to +20
+                        const hNorm = (ty + 20) / 40; 
+                        
+                        let targetX = tx + noiseX;
+                        let targetY = ty + noiseY;
+                        let targetZ = tz + noiseZ;
+
+                        // If particle is "above" the current growth line, hide it or squash it
+                        if (STATE.mode === 1 && hNorm > STATE.treeGrowth) {
+                             // Option A: Hide
+                             // currentPositions[i].y = -100;
+                             
+                             // Option B: Scale 0 (handled below)
+                             // Just keep position correct so it pops in
+                        }
+
+                        const speed = 0.05 + (Math.random() * 0.02);
+                        currentPositions[i].x += (targetX - currentPositions[i].x) * speed;
+                        currentPositions[i].y += (targetY - currentPositions[i].y) * speed;
+                        currentPositions[i].z += (targetZ - currentPositions[i].z) * speed;
+                    } else {
+                        // Unused firework particles
+                        currentPositions[i].y = -100;
+                    }
+
+                    // Update Instance
+                    dummy.position.set(currentPositions[i].x, currentPositions[i].y, currentPositions[i].z);
+                    
+                    let scale = 1.0;
+                    if(STATE.mode === 3 && fireworkData[i].type === 'snow') scale = 0.5;
+                    if(fireworkData[i].type === 'firework') scale = fireworkData[i].life * 2.0; 
+                    if(fireworkData[i].type === 'ornament') scale = 4.5; // Even bigger ornaments
+                    
+                    // Growth Scale Logic for Tree
+                    if (STATE.mode === 1 && i < TREE_PARTICLE_COUNT) {
+                        const ty = targetPositions[i].y;
+                        const hNorm = (ty + 20) / 40;
+                        if (hNorm > STATE.treeGrowth) scale = 0; // Hide not-yet-grown parts
+                        else if (hNorm > STATE.treeGrowth - 0.1) {
+                            // Pop in effect at the leading edge
+                            scale *= (STATE.treeGrowth - hNorm) / 0.1;
+                        }
+                    }
+
+                    dummy.scale.setScalar(scale);
+                    dummy.updateMatrix();
+                    mesh.setMatrixAt(instanceIdx, dummy.matrix);
+
+                    // Color Lerp
+                    const targetC = targetColors[i];
+                    _color.setRGB(colors[i].r, colors[i].g, colors[i].b);
+                    _color.lerp(targetC, 0.05);
+                    colors[i].r = _color.r;
+                    colors[i].g = _color.g;
+                    colors[i].b = _color.b;
+                    
+                    mesh.setColorAt(instanceIdx, _color);
+                }
+                mesh.instanceMatrix.needsUpdate = true;
+                mesh.instanceColor.needsUpdate = true;
+            };
+
+            // Update Spheres (Indices 0 to totalSphere-1)
+            // Note: totalSphere is SPHERE_COUNT + FIREWORK_COUNT
+            // We need to pass the correct offsets
+            // sphereMesh contains indices 0 to (SPHERE_COUNT + FIREWORK_COUNT - 1)
+            const sphereTotal = SPHERE_COUNT + FIREWORK_COUNT;
+            updateMesh(sphereMesh, 0, sphereTotal, 0);
+
+            // Update Boxes (Indices starting after sphereTotal)
+            // boxMesh contains indices 0 to BOX_COUNT-1
+            // But in our logic loop, these are indices sphereTotal to PARTICLE_COUNT-1
+            updateMesh(boxMesh, sphereTotal, PARTICLE_COUNT, sphereTotal);
+
+            composer.render();
+        }
+
+        // --- MediaPipe Logic ---
+        let handLandmarker = undefined;
+        let lastVideoTime = -1;
+
+        const video = document.getElementById('camera-feed');
+
+        async function createHandLandmarker() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                );
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+                startWebcam();
+            } catch (e) {
+                console.warn("MediaPipe failed to load, staying in simulation mode.", e);
+            }
+        }
+
+        function startWebcam() {
+            // Function to handle fallback to simulation
+            const enableSimulation = (reason) => {
+                console.warn("Camera init failed, enabling simulation:", reason);
+                const loader = document.getElementById('loading-screen');
+                if(loader && loader.style.opacity !== '0') {
+                    loader.style.opacity = 0;
+                    setTimeout(() => loader.remove(), 1000);
+                }
+                const info = document.getElementById('info');
+                if(info && !info.innerHTML.includes('Simulation Mode')) {
+                    info.innerHTML += " <br><span style='color:orange'>(Simulation Mode: Keys 1-3 to switch demos, Mouse to rotate/zoom)</span>";
+                }
+            };
+
+            // Safety check for API
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                enableSimulation("getUserMedia not supported");
+                return;
+            }
+
+            const constraints = { video: true };
+            navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", predictWebcam);
+                
+                // Remove loading screen when camera starts
+                const loader = document.getElementById('loading-screen');
+                if(loader) {
+                    loader.style.opacity = 0;
+                    setTimeout(() => loader.remove(), 1000);
+                }
+            }).catch((err) => {
+                enableSimulation(err);
+            });
+        }
+
+        // Force remove loader after 5 seconds if still present (Safety Net)
+        setTimeout(() => {
+            const loader = document.getElementById('loading-screen');
+            if(loader && document.body.contains(loader)) {
+                console.log("Force removing loader timeout");
+                loader.style.opacity = 0;
+                setTimeout(() => loader.remove(), 1000);
+                // Also ensure sim mode info is shown if it wasn't already
+                const info = document.getElementById('info');
+                if(info && !info.innerHTML.includes('Simulation Mode')) {
+                     info.innerHTML += " <br><span style='color:orange'>(Simulation Mode: Keys 1-3 to switch demos, Mouse to rotate/zoom)</span>";
+                }
+            }
+        }, 5000);
+
+        async function predictWebcam() {
+            let startTimeMs = performance.now();
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+                
+                if (results.landmarks && results.landmarks.length > 0) {
+                    STATE.handPresent = true;
+                    const landmarks = results.landmarks[0];
+                    processGestures(landmarks);
+                } else {
+                    STATE.handPresent = false;
+                    // Reset to mode 1 if hand lost for a while? Maybe keep last state.
+                    // Let's default to Mode 1 if hand is gone for too long logic could go here
+                }
+            }
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        function processGestures(landmarks) {
+            // 1. Gesture Recognition
+            const wrist = landmarks[0];
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const middleTip = landmarks[12];
+            const ringTip = landmarks[16];
+            const pinkyTip = landmarks[20];
+            const middleRoot = landmarks[9]; // Middle finger MCP
+
+            // Calculate average distance from wrist to tips
+            const d1 = distance(wrist, thumbTip);
+            const d2 = distance(wrist, indexTip);
+            const d3 = distance(wrist, middleTip);
+            const d4 = distance(wrist, ringTip);
+            const d5 = distance(wrist, pinkyTip);
+            const avgDist = (d1 + d2 + d3 + d4 + d5) / 5;
+
+            // Determine Mode
+            let newMode = STATE.mode;
+            if (avgDist > 0.4) {
+                newMode = 2; // Open Hand -> Fireworks
+            } else if (avgDist < 0.25) {
+                newMode = 3; // Fist -> Crystal Ball
+            } else {
+                newMode = 1; // Default / Transition
+            }
+
+            if (newMode !== STATE.mode) {
+                STATE.mode = newMode;
+                updateTargets();
+            }
+
+            // 2. Interaction (Rotation)
+            // Map hand center (approx middleRoot) X/Y to Rotation
+            // Landmarks are 0-1. 0.5 is center.
+            const kSensitivity = 2.0;
+            const targetRotY = (middleRoot.x - 0.5) * kSensitivity * -Math.PI; // Invert X for mirror effect
+            const targetRotX = (middleRoot.y - 0.5) * kSensitivity * Math.PI * 0.5;
+            
+            STATE.targetRotation.x = targetRotX;
+            STATE.targetRotation.y = targetRotY;
+
+            // 3. Interaction (Zoom)
+            // Palm Size: distance from Wrist(0) to MiddleMCP(9)
+            // Larger distance = Hand Closer = Zoom In
+            const palmSize = distance(wrist, middleRoot);
+            // Empirically, palmSize varies from approx 0.1 (far) to 0.3 (close)
+            // Map 0.1 -> Dist 90, 0.3 -> Dist 20
+            const zoomFactor = (palmSize - 0.1) / (0.3 - 0.1); // Normalized 0-1
+            STATE.targetZoom = 90 - (Math.min(Math.max(zoomFactor, 0), 1) * 70);
+        }
+
+        function distance(p1, p2) {
+            return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2)); // 2D distance for screen space
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Start
+        // Add some CSS particles to loader
+        const lpContainer = document.getElementById('lp-container');
+        for(let i=0; i<30; i++) {
+            const p = document.createElement('div');
+            p.classList.add('particle');
+            p.style.left = Math.random() * 100 + '%';
+            p.style.top = Math.random() * 100 + '%';
+            p.style.width = Math.random() * 10 + 2 + 'px';
+            p.style.height = p.style.width;
+            p.style.animationDuration = (Math.random() * 3 + 2) + 's';
+            p.style.animationDelay = -Math.random() * 5 + 's';
+            lpContainer.appendChild(p);
+        }
+
+        // CRITICAL FIX: Start animation loop IMMEDIATELY. Do not wait for AI/Camera.
+        animate();
+
+        // CRITICAL FIX: Force remove loading screen after 2 seconds regardless of AI status
+        setTimeout(() => {
+            const loader = document.getElementById('loading-screen');
+            if(loader) {
+                console.log("Auto-removing loader (Simulation Priority)");
+                loader.style.opacity = 0;
+                setTimeout(() => loader.remove(), 1000);
+            }
+            const info = document.getElementById('info');
+            if(info && !info.innerHTML.includes('Simulation Mode')) {
+                info.innerHTML += " <br><span style='color:orange'>(Simulation Mode Active)</span>";
+            }
+        }, 2000);
+
+        // Attempt to load AI in background
+        createHandLandmarker().catch(err => {
+            console.warn("AI Init Failed (Harmless if using mouse):", err);
+        });
+
+        // --- Simulation Mode (Mouse/Keyboard) ---
+        // Instructions: 
+        // 1: Tree, 2: Fireworks, 3: Crystal Ball
+        // Mouse Move: Rotate
+        // Mouse Wheel: Zoom
+        
+        window.addEventListener('keydown', (e) => {
+            const info = document.getElementById('info');
+            // Force handler to work even if other things are stuck
+            console.log("Key pressed:", e.key); 
+            
+            // Keys to switch modes
+            if(e.key === '1') { 
+                STATE.mode = 1; 
+                updateTargets(); 
+                if(info) info.innerHTML = "Mode 1: Spiral Tree <br><span style='color:orange'>(Simulation Mode: Keys 1-3 to switch, Mouse to rotate)</span>";
+            }
+            if(e.key === '2') { 
+                STATE.mode = 2; 
+                updateTargets(); 
+                if(info) info.innerHTML = "Mode 2: Fireworks & Ornaments <br><span style='color:orange'>(Simulation Mode: Keys 1-3 to switch, Mouse to rotate)</span>";
+            }
+            if(e.key === '3') { 
+                STATE.mode = 3; 
+                updateTargets(); 
+                if(info) info.innerHTML = "Mode 3: Crystal Ball <br><span style='color:orange'>(Simulation Mode: Keys 1-3 to switch, Mouse to rotate)</span>";
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+             // Simulate hand presence for animation loop
+             STATE.handPresent = true;
+             
+             // Map screen X/Y to rotation similar to hand logic
+             // Center (0.5, 0.5) is (window.innerWidth/2, window.innerHeight/2)
+             const x = e.clientX / window.innerWidth;
+             const y = e.clientY / window.innerHeight;
+             
+             const kSensitivity = 2.0;
+             STATE.targetRotation.y = (x - 0.5) * kSensitivity * -Math.PI; 
+             STATE.targetRotation.x = (y - 0.5) * kSensitivity * Math.PI * 0.5;
+        });
+
+        window.addEventListener('wheel', (e) => {
+            STATE.handPresent = true;
+            // Zoom
+            STATE.targetZoom += e.deltaY * 0.05;
+            STATE.targetZoom = Math.max(20, Math.min(90, STATE.targetZoom));
+        });
+
+    </script>
+</body>
+</html>
+
